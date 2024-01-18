@@ -1,6 +1,12 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_hooks/flutter_hooks.dart';
+import 'package:flutter_study/createTodo.graphql.dart';
+import 'package:graphql_flutter/graphql_flutter.dart';
+import 'allTodos.graphql.dart';
 
-void main() {
+void main() async {
+  await initHiveForFlutter();
+
   runApp(const MyApp());
 }
 
@@ -10,64 +16,69 @@ class MyApp extends StatelessWidget {
   // This widget is the root of your application.
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Flutter Demo',
-      theme: ThemeData(
-        // This is the theme of your application.
-        //
-        // TRY THIS: Try running your application with "flutter run". You'll see
-        // the application has a purple toolbar. Then, without quitting the app,
-        // try changing the seedColor in the colorScheme below to Colors.green
-        // and then invoke "hot reload" (save your changes or press the "hot
-        // reload" button in a Flutter-supported IDE, or press "r" if you used
-        // the command line to start the app).
-        //
-        // Notice that the counter didn't reset back to zero; the application
-        // state is not lost during the reload. To reset the state, use hot
-        // restart instead.
-        //
-        // This works for code too, not just values: Most code changes can be
-        // tested with just a hot reload.
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
-        useMaterial3: true,
+    final link = HttpLink('https://graphqlzero.almansi.me/api');
+
+    final client = ValueNotifier<GraphQLClient>(
+      GraphQLClient(
+        link: link,
+        cache: GraphQLCache(store: HiveStore()),
       ),
-      home: const TodoList(),
+    );
+
+    return GraphQLProvider(
+      client: client,
+      child: MaterialApp(
+        title: 'Flutter Demo',
+        theme: ThemeData(
+          colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
+          useMaterial3: true,
+        ),
+        home: const TodoList(),
+      ),
     );
   }
 }
 
-class TodoList extends StatefulWidget {
+class TodoList extends HookWidget {
   const TodoList({super.key});
 
   @override
-  State<StatefulWidget> createState() => _TodoListPage();
-}
-
-class _TodoListPage extends State<TodoList> {
-  List<String> todos = [];
-
-  @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: const NavigationBar(title: "TODOリスト"),
-      body: ListView.builder(
-        itemCount: todos.length,
+    final allTodosResult = useQuery$FetchAllTodos().result;
+    final createTodo = useMutation$CreateTodo();
+
+    Widget body;
+
+    if (allTodosResult.isLoading) {
+      body = const Center(
+        child: CircularProgressIndicator(),
+      );
+    } else if (allTodosResult.hasException) {
+      body = Text("エラーが発生しました: ${allTodosResult.exception.toString()}");
+    } else {
+      final todos = allTodosResult.parsedData?.todos;
+      body = ListView.builder(
+        itemCount: todos?.data?.length,
         itemBuilder: (context, index) {
           return Card(
             child: ListTile(
-              title: Text(todos[index]),
+              title: Text(todos?.data?[index]?.title ?? ""),
             ),
           );
         },
-      ),
+      );
+    }
+
+    return Scaffold(
+      appBar: const NavigationBar(title: "TODOリスト"),
+      body: body,
       floatingActionButton: FloatingActionButton(
         onPressed: () async {
           var newTodo = await Navigator.push(context,
               MaterialPageRoute(builder: (context) => const TodoAddPage()));
           if (newTodo != null) {
-            setState(() {
-              todos.add(newTodo);
-            });
+            createTodo
+                .runMutation(Variables$Mutation$CreateTodo(title: newTodo));
           }
         },
         shape: const CircleBorder(),
